@@ -1,9 +1,8 @@
-package negroni
+package onion
 
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"testing"
 )
@@ -21,32 +20,27 @@ func refute(t *testing.T, a interface{}, b interface{}) {
 	}
 }
 
-func TestNegroniRun(t *testing.T) {
-	// just test that Run doesn't bomb
-	go New().Run(":3000")
-}
-
-func TestNegroniWith(t *testing.T) {
+func TestOnionWith(t *testing.T) {
 	result := ""
 	response := httptest.NewRecorder()
 
 	n1 := New()
-	n1.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n1.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		result = "one"
-		next(rw, r)
+		next.ServeHTTP(rw, r)
 	}))
-	n1.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n1.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		result += "two"
-		next(rw, r)
+		next.ServeHTTP(rw, r)
 	}))
 
 	n1.ServeHTTP(response, (*http.Request)(nil))
 	expect(t, 2, len(n1.Handlers()))
 	expect(t, result, "onetwo")
 
-	n2 := n1.With(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n2 := n1.With(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		result += "three"
-		next(rw, r)
+		next.ServeHTTP(rw, r)
 	}))
 
 	// Verify that n1 was left intact and not modified.
@@ -59,27 +53,27 @@ func TestNegroniWith(t *testing.T) {
 	expect(t, result, "onetwothree")
 }
 
-func TestNegroniWith_doNotModifyOriginal(t *testing.T) {
+func TestOnionWith_doNotModifyOriginal(t *testing.T) {
 	result := ""
 	response := httptest.NewRecorder()
 
 	n1 := New()
 	n1.handlers = make([]Handler, 0, 10) // enforce initial capacity
-	n1.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n1.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		result = "one"
-		next(rw, r)
+		next.ServeHTTP(rw, r)
 	}))
 
 	n1.ServeHTTP(response, (*http.Request)(nil))
 	expect(t, 1, len(n1.Handlers()))
 
-	n2 := n1.With(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n2 := n1.With(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		result += "two"
-		next(rw, r)
+		next.ServeHTTP(rw, r)
 	}))
-	n3 := n1.With(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n3 := n1.With(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		result += "three"
-		next(rw, r)
+		next.ServeHTTP(rw, r)
 	}))
 
 	// rebuilds middleware
@@ -99,22 +93,22 @@ func TestNegroniWith_doNotModifyOriginal(t *testing.T) {
 	expect(t, result, "onethree")
 }
 
-func TestNegroniServeHTTP(t *testing.T) {
+func TestOnionServeHTTP(t *testing.T) {
 	result := ""
 	response := httptest.NewRecorder()
 
 	n := New()
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		result += "foo"
-		next(rw, r)
+		next.ServeHTTP(rw, r)
 		result += "ban"
 	}))
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		result += "bar"
-		next(rw, r)
+		next.ServeHTTP(rw, r)
 		result += "baz"
 	}))
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		result += "bat"
 		rw.WriteHeader(http.StatusBadRequest)
 	}))
@@ -125,7 +119,7 @@ func TestNegroniServeHTTP(t *testing.T) {
 	expect(t, response.Code, http.StatusBadRequest)
 }
 
-// Ensures that a Negroni middleware chain
+// Ensures that a Onion middleware chain
 // can correctly return all of its handlers.
 func TestHandlers(t *testing.T) {
 	response := httptest.NewRecorder()
@@ -133,7 +127,7 @@ func TestHandlers(t *testing.T) {
 	handlers := n.Handlers()
 	expect(t, 0, len(handlers))
 
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.Handler) {
 		rw.WriteHeader(http.StatusOK)
 	}))
 
@@ -148,31 +142,16 @@ func TestHandlers(t *testing.T) {
 	expect(t, response.Code, http.StatusOK)
 }
 
-func TestNegroni_Use_Nil(t *testing.T) {
+func TestOnion_Use_Nil(t *testing.T) {
 	defer func() {
 		err := recover()
 		if err == nil {
-			t.Errorf("Expected negroni.Use(nil) to panic, but it did not")
+			t.Errorf("Expected onion.Use(nil) to panic, but it did not")
 		}
 	}()
 
 	n := New()
 	n.Use(nil)
-}
-
-func TestDetectAddress(t *testing.T) {
-	if detectAddress() != DefaultAddress {
-		t.Error("Expected the DefaultAddress")
-	}
-
-	if detectAddress(":6060") != ":6060" {
-		t.Error("Expected the provided address")
-	}
-
-	os.Setenv("PORT", "8080")
-	if detectAddress() != ":8080" {
-		t.Error("Expected the PORT env var with a prefixed colon")
-	}
 }
 
 func voidHTTPHandlerFunc(rw http.ResponseWriter, r *http.Request) {
@@ -187,7 +166,7 @@ func TestWrap(t *testing.T) {
 		rw.WriteHeader(http.StatusOK)
 	}))
 
-	handler.ServeHTTP(response, (*http.Request)(nil), voidHTTPHandlerFunc)
+	handler.ServeHTTP(response, (*http.Request)(nil), http.HandlerFunc(voidHTTPHandlerFunc))
 
 	expect(t, response.Code, http.StatusOK)
 }
@@ -201,7 +180,34 @@ func TestWrapFunc(t *testing.T) {
 		rw.WriteHeader(http.StatusOK)
 	})
 
-	handler.ServeHTTP(response, (*http.Request)(nil), voidHTTPHandlerFunc)
+	handler.ServeHTTP(response, (*http.Request)(nil), http.HandlerFunc(voidHTTPHandlerFunc))
 
 	expect(t, response.Code, http.StatusOK)
+}
+
+type voidHandler struct{}
+
+func (vh *voidHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request, next http.Handler) {
+	next.ServeHTTP(rw, r)
+}
+
+func BenchmarkOnion(b *testing.B) {
+	h0 := &voidHandler{}
+	h1 := &voidHandler{}
+	h2 := &voidHandler{}
+	h3 := &voidHandler{}
+	h4 := &voidHandler{}
+	h5 := &voidHandler{}
+	h6 := &voidHandler{}
+	h7 := &voidHandler{}
+	h8 := &voidHandler{}
+	h9 := &voidHandler{}
+
+	n := New(h0, h1, h2, h3, h4, h5, h6, h7, h8, h9)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		n.ServeHTTP(nil, nil)
+	}
 }
